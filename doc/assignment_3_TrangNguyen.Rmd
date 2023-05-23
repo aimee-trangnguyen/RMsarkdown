@@ -1,0 +1,233 @@
+---
+title: "Assignment 3"
+author: "Trang Thuy Nguyen  ID29091985"
+date: "October 17, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(broom.mixed)
+library(visreg)
+library(lme4)
+load("A3.RData")
+```
+
+#Question 1
+
+```{r echo=FALSE}
+school <- school %>%
+  mutate(School = as.factor(School),
+         Type = recode(Type, "1" = "public", "2" = "private"))
+
+student <- student %>%
+  mutate(School = as.factor(School))
+```
+
+We have nested levels in this data. Because a student can only study in one school (student nested in school) and a school can only be either private or public (school nested in Type of school).
+
+#Question 2
+
+```{r warning = FALSE, echo=FALSE}
+student <- student %>%
+  group_by(School) %>%
+  mutate(mStatus = mean(Status))
+
+student <- student %>%
+  mutate(cStatus = Status - mStatus)
+
+mydf <- left_join(school, student)
+
+mydf
+```
+
+#Question 3
+
+```{r echo=FALSE}
+#Find 10 smallest public schools
+ten_smallest_public <- mydf %>%
+  filter(Type == "public") %>%
+  select(School,Size) %>%
+  group_by(School) %>%
+  distinct() %>%
+  arrange(Size)
+
+#Find 10 smallest private schools
+ten_smallest_private <- mydf %>%
+  filter(Type == "private") %>%
+  select(School,Size) %>%
+  group_by(School) %>%
+  distinct() %>%
+  arrange(Size)
+
+#Plot graphs
+mydf %>%
+  select(Math, cStatus, School) %>%
+  filter(School %in% c("14", "39",  "35", "25", "36", "40", "1", "17", "46", "44" )) %>%
+  ggplot(aes(x= cStatus, y = Math)) + geom_point() + facet_wrap(~School, ncol = 5) + ggtitle("Math agaisnt cStatus for public school") +geom_smooth()
+
+mydf %>%
+  select(Math, cStatus, School) %>%
+  filter(School %in% c("9", "33",  "49", "15", "5", "41", "22", "50", "11", "12" )) %>%
+  ggplot(aes(x= cStatus, y = Math)) + geom_point() + facet_wrap(~School, ncol = 5) + ggtitle("Math agaisnt cStatus for public school") + geom_smooth()
+```
+
+Overall, for both type of school, the higher the social-economic status of their parents, the students tend to achieve higher Math score.  However, there is also an exception, for example, **public** school number *25* graph shows the opposite effect where student with higher family social-economic status tend to get lower Math grade. 
+
+The Math scores in both types of school also range from under 0 to below 25. It also seems like there are more students with lower family social-economic status study in **public** schools than **private** schools because the points skewed to the left.
+
+#Question 4
+
+```{r echo=FALSE, warning=FALSE}
+#Fit the linear model 
+lm <- mydf %>%
+  group_by(School) %>%
+  do(tidy(lm(Math ~ cStatus, data=.))) %>%
+  select(School, term, estimate) %>%
+  spread(key=term, value=estimate) %>%
+  ungroup %>%
+  rename(
+    intercept = `(Intercept)`,
+    slope = `cStatus`
+  ) 
+
+mydf2 <- 
+  mydf %>% 
+  select(School, Math, Type) %>%
+  distinct
+
+lm2 <- left_join(lm, mydf2)
+
+#Plot the graphs
+ggplot(lm2) + 
+  geom_boxplot(aes(x=Type,y=slope)) +ggtitle("Boxplot: Slopes of the school type")
+
+ggplot(lm2) + 
+  geom_boxplot(aes(x=Type,y= intercept)) + ggtitle("Boxplot: Intercept of the school type")
+```
+
+Looking at the boxplot plot for the *slope*, it is obvious that the effect of social-economic status to the Math score is stronger for **public** school than **private** school (this is illustrated by the higher median in the boxplot). The effect of social-economic status is also more varied for **private** school than **public** school (due to larger range). Some outliers also appeared for both type of school. For example, an outlier from **private** school type which has the slope of more than *6*, this indicates that the difference in Math scores in this school is significantly affected by the social-economic status.
+
+According to the *intercept* boxplot, we can see that on average, students in **private** school achieve higher Math scores than students in **public school**. The ranges of the Math score also vary in both school types.
+
+#Question 5
+
+```{r}
+me_mod <- lmer(Math ~ mStatus + cStatus + Type + cStatus*Type + (cStatus|School), data = mydf)
+```
+
+#Question 6
+
+```{r echo=FALSE}
+summary(me_mod)
+```
+
++ On average, 1 value increase in the mean of the social-economic status within school where the student attend, the Math score will be 4.51 points higher, while holding everything else constant.
+
++ On average, **public** school students achieve 0.31 points lower in Math score than **private** school students.
+
++ The Math score of **private** school students will be 1.26 points higher if the social-economic status of their parents increase by 1 value.
+
++ Likewise, The Math score of **public** school students will be 1.62 (1.26 + 0.37) points higher if the social-economic status of their parents increase by 1 value.
+
+
+```{r echo=FALSE}
+visreg(me_mod, "cStatus", by="Type", gg=TRUE, partial=FALSE, rug=FALSE, overlay=TRUE) + theme_bw()
+```
+
+For both type of schools, students whose parents have higher social-economic status tend to achieve higher Math score. With the group of lower social-economic status, it seems that **private** school students achieve higher score than **public** school students. On the other hand, with high social-economic status group, **public** students are more likely to get higher Math score.
+
+#Question 7
+
+```{r echo=FALSE, warning=FALSE}
+library(ggrepel)
+ranef(me_mod) %>%
+  as_tibble() %>%
+  filter(grpvar == "School", term == "(Intercept)" ) %>%
+  select(condval) %>%
+  rename(adjsscore = condval ) %>%
+  bind_cols(rawscore=coefficients(lm(Math~ School-1, data=mydf))) %>%
+  mutate(rawscore = scale(rawscore),
+         adjsscore= scale(adjsscore),
+         school= seq(length(rawscore))) %>%
+  ggplot(aes(x=rawscore, y = adjsscore, label= school)) + geom_point() + geom_abline(intercept = 0, slope = 1) + geom_text_repel()
+```
+
+The variability of the intercept across schools is 2.66. So the Math score across schools vary from the average Math score of all schools 1.6 points. School **43** has not too high raw score but is best in adjusted score. On the other hand, school **24** and **31** have high raw scores but their adjusted scores are low. 
+
+The variability of the slopes between schools is 0.61. The correlation between slopes and intercepts is only 0.12, which means there is almost no relation between slopes and intercepts.
+
+
+#Question 8
+
+```{r echo=FALSE}
+diagd <- augment(me_mod)
+
+#Whether residuals are normally distributed
+ggplot(diagd) + geom_qq(aes(sample=.resid))
+```
+
+This looks really good with the line nearly lies on 45 degree line. Thus, we can confirm the normality of residuals.
+
+```{r echo=FALSE}
+#Whether residuals are randomly distributed
+
+ggplot(diagd) +
+  geom_point(aes(y=.resid, x =.fitted), alpha = 0.3) +
+  geom_hline(yintercept = 0)
+```
+
+The graph looks kind of like a diamond shape, but overall, all the points scatter around 0 so we can say that residuals are randomly distributed.
+
+```{r echo=FALSE}
+#Assumption: RE are normally distributed
+ranef(me_mod) %>%
+  as_tibble() %>%
+  ggplot() +
+  geom_qq(aes(sample = condval)) +
+  facet_wrap(~grpvar)
+```
+
+Now we examine the assumption that random effect is normally distributed. Looking at this graph, it somewhat follows 45 degree line but there are some fluctuations at both of the tails. 
+
+#Question 9
+
+```{r warning=FALSE, echo=FALSE}
+confint(me_mod, method = "boot")
+```
+
++ Fixed effect: Only `mStatus` and `cStatus` are significant because the confidence interval of these two variables do not contain 0. However the lower bound of `cStatus` is really close to 0, in which we can say that `cStatus` is less significant than `mStatus`. For `Type` and the interaction `Type:cStatus`, they both contain 0 so they are not significant.
+
++ Random effect: the correlation between the random effects is not significant since it contains 0. Thus, there is a probability of variance of randome effect of 0, which means there is no school random effect.
+
+#Question 10
+
+```{r warning=FALSE, echo=FALSE}
+me_mod_null <- lmer(Math ~ mStatus + cStatus  +(cStatus|School), data = mydf, REML = FALSE)
+me_mod_2 <- lmer(Math ~ mStatus + cStatus + Type + cStatus*Type + (cStatus|School), data = mydf, REML = FALSE)
+actual <- 2*(logLik(me_mod_2)-logLik(me_mod_null))
+
+# Simulate from null model
+set.seed(5)
+nsim <- 1000
+lrstat <- numeric(nsim)
+for(i in seq(nsim))
+{
+  y <- simulate(me_mod_null)[,1]
+  bnull <- lmer(y ~ mStatus + cStatus  +(cStatus|School), data = mydf, REML = FALSE)
+  balt <- lmer(y ~ mStatus + cStatus + Type + cStatus*Type + (cStatus|School), data = mydf, REML = FALSE)
+  lrstat[i] <- 2*(logLik(balt)-logLik(bnull))
+}
+# Compute bootstrap p-value
+hist(lrstat)
+mean(actual < lrstat)
+
+```
+
+The actual log-likelihood ratio of the model is in the left tail of the histogram so the probability of not rejecting the null might be large. 
+Next, we check the p-value to confirm the result. It turns out that p-value is much larger than 0.05 so we definitely cannot reject the null. This indicates that there is no mean to include the interaction term **Type:cStatus** and **Type** in the model, the model is better without these two variables. This conclusion is also in line with the finding on question 9 that **Type** variable and the interaction term are not significant.
+
